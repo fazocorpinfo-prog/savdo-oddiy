@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Category,
   Currency,
@@ -11,6 +11,7 @@ import type {
 import { UNITS } from "../types";
 import { t } from "../i18n";
 import { calcSalePrice, genBarcode, uid } from "../utils";
+import { uploadImage } from "../lib/image-upload";
 import {
   IconChevronDown,
   IconClose,
@@ -45,6 +46,92 @@ const EMPTY: Product = {
   stocks: [],
 };
 
+/* ── Numeric input with thousands-separator display ── */
+function NumericInput({
+  value,
+  onChange,
+  min,
+  className,
+  ...rest
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "min">) {
+  const [focused, setFocused] = useState(false);
+  const [raw, setRaw] = useState("");
+
+  const group = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const fmt = (n: number) => (n === 0 ? "" : group(n.toString()));
+
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setRaw(value === 0 ? "" : String(value));
+    setFocused(true);
+    requestAnimationFrame(() => e.target.select());
+  };
+
+  const handleBlur = () => {
+    const n = parseFloat(raw.replace(/\s/g, "")) || 0;
+    const clamped = min !== undefined ? Math.max(min, n) : n;
+    onChange(clamped);
+    setFocused(false);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const el = e.target;
+    const plain = el.value.replace(/\s/g, "");
+    if (!/^-?\d*\.?\d*$/.test(plain)) return;
+    // Kursordan oldingi raqamlar sonini eslab qolamiz (guruhlashdan keyin tiklash uchun)
+    const digitsBeforeCursor = el.value
+      .slice(0, el.selectionStart ?? el.value.length)
+      .replace(/\s/g, "").length;
+    setRaw(plain);
+    onChange(parseFloat(plain) || 0);
+    requestAnimationFrame(() => {
+      const formatted = group(plain);
+      let seen = 0;
+      let pos = formatted.length;
+      for (let i = 0; i < formatted.length; i++) {
+        if (formatted[i] !== " ") seen++;
+        if (seen === digitsBeforeCursor) {
+          pos = i + 1;
+          break;
+        }
+      }
+      if (digitsBeforeCursor === 0) pos = 0;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      className={className}
+      value={focused ? group(raw) : fmt(value)}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onChange={handleChange}
+      placeholder="0"
+      {...rest}
+    />
+  );
+}
+
+/* ── Phone formatter: +998 90 123-45-67 ── */
+function fmtPhone(input: string): string {
+  const digits = input.replace(/\D/g, "");
+  const local = digits.startsWith("998") ? digits.slice(3) : digits;
+  const d = local.slice(0, 9);
+  if (!d) return "";
+  let out = "+998";
+  if (d.length >= 1) out += " " + d.slice(0, 2);
+  if (d.length >= 3) out += " " + d.slice(2, 5);
+  if (d.length >= 6) out += "-" + d.slice(5, 7);
+  if (d.length >= 8) out += "-" + d.slice(7, 9);
+  return out;
+}
+
 export default function ProductFormModal({
   editing,
   categories,
@@ -69,9 +156,21 @@ export default function ProductFormModal({
   );
   const [showStores, setShowStores] = useState(true);
   const [newStoreName, setNewStoreName] = useState("");
+  const [imgUploading, setImgUploading] = useState(false);
+  const [imgError, setImgError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
 
   const isEdit = !!editing;
+
+  /* Escape key closes modal */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   const setField = <K extends keyof Product>(key: K, value: Product[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -102,15 +201,18 @@ export default function ProductFormModal({
     });
   };
 
-  const onImageFile = (file?: File) => {
+  const onImageFile = async (file?: File) => {
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Rasm 2MB dan kichik bo'lishi kerak.");
-      return;
+    setImgError("");
+    setImgUploading(true);
+    try {
+      const url = await uploadImage(file);
+      setField("image", url);
+    } catch {
+      setImgError("Rasm yuklanmadi. Qayta urinib ko'ring.");
+    } finally {
+      setImgUploading(false);
     }
-    const reader = new FileReader();
-    reader.onload = () => setField("image", String(reader.result));
-    reader.readAsDataURL(file);
   };
 
   const setStockQty = (storeId: string, qty: number) => {
@@ -152,12 +254,17 @@ export default function ProductFormModal({
       barcode:
         autoBarcode || !form.barcode.trim() ? genBarcode() : form.barcode.trim(),
       brand: form.brand?.trim() || undefined,
-      brandPhone: form.brandPhone?.trim() || undefined,
+      brandPhone:
+        form.brandPhone && form.brandPhone.replace(/\D/g, "").length >= 12
+          ? form.brandPhone
+          : undefined,
       description: form.description?.trim() || undefined,
       stocks: form.stocks.filter((s) => stores.some((x) => x.id === s.storeId)),
     };
     onSave(out);
   };
+
+  const currencyPrefix = form.currency === "USD" ? "$" : "UZS";
 
   const allStoresInForm: StoreStock[] = useMemo(() => {
     const map = new Map(form.stocks.map((s) => [s.storeId, s.qty]));
@@ -179,6 +286,7 @@ export default function ProductFormModal({
 
         <div className="modal-body">
           <div className="form-grid">
+            {/* Name */}
             <div className="form-row" style={{ gridColumn: "1 / span 1" }}>
               <label>
                 {t(lang, "productName")} <span className="req">*</span>
@@ -192,6 +300,7 @@ export default function ProductFormModal({
               />
             </div>
 
+            {/* Image */}
             <div className="form-row" style={{ gridColumn: "2 / span 1" }}>
               <label className="row-between">
                 <span>{t(lang, "image")}</span>
@@ -207,12 +316,24 @@ export default function ProductFormModal({
               <div className="image-uploader">
                 <div
                   className="preview"
-                  onClick={() => fileRef.current?.click()}
+                  onClick={() => !imgUploading && fileRef.current?.click()}
                   role="button"
+                  style={{ opacity: imgUploading ? 0.6 : 1 }}
                 >
-                  {form.image ? <img src={form.image} alt="" /> : <IconUpload size={20} />}
+                  {imgUploading ? (
+                    <span className="muted small">Yuklanmoqda...</span>
+                  ) : form.image ? (
+                    <img src={form.image} alt="" />
+                  ) : (
+                    <IconUpload size={20} />
+                  )}
                 </div>
-                {form.image && (
+                {imgError && (
+                  <div className="muted small" style={{ color: "var(--danger)" }}>
+                    {imgError}
+                  </div>
+                )}
+                {form.image && !imgUploading && (
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
@@ -231,6 +352,7 @@ export default function ProductFormModal({
               </div>
             </div>
 
+            {/* Brand */}
             <div className="form-row">
               <label>{t(lang, "brand")}</label>
               <input
@@ -241,16 +363,33 @@ export default function ProductFormModal({
               />
             </div>
 
+            {/* Phone */}
             <div className="form-row">
               <label>{t(lang, "brandPhone")}</label>
               <input
+                ref={phoneRef}
                 type="tel"
-                placeholder="+998 XX XXX XX XX"
+                placeholder="+998 90 123-45-67"
                 value={form.brandPhone ?? ""}
-                onChange={(e) => setField("brandPhone", e.target.value)}
+                onChange={(e) => setField("brandPhone", fmtPhone(e.target.value))}
+                onFocus={() => {
+                  if (!form.brandPhone) {
+                    setField("brandPhone", "+998 ");
+                    setTimeout(() => {
+                      const el = phoneRef.current;
+                      if (el) el.setSelectionRange(el.value.length, el.value.length);
+                    }, 0);
+                  }
+                }}
+                onBlur={() => {
+                  if ((form.brandPhone ?? "").replace(/\D/g, "").length <= 3) {
+                    setField("brandPhone", "");
+                  }
+                }}
               />
             </div>
 
+            {/* Category */}
             <div className="form-row">
               <label>{t(lang, "category")}</label>
               <div className="select-with-add">
@@ -283,6 +422,7 @@ export default function ProductFormModal({
               </div>
             </div>
 
+            {/* Unit */}
             <div className="form-row">
               <label>{t(lang, "unit")}</label>
               <div className="select-wrap">
@@ -300,6 +440,7 @@ export default function ProductFormModal({
               </div>
             </div>
 
+            {/* Currency toggle */}
             <div className="form-row full">
               <div className="seg-toggle">
                 {(["UZS", "USD"] as Currency[]).map((c) => (
@@ -315,37 +456,47 @@ export default function ProductFormModal({
               </div>
             </div>
 
+            {/* Purchase price */}
             <div className="form-row">
               <label>{t(lang, "purchasePrice")}</label>
-              <input
-                type="number"
-                min={0}
-                value={form.purchasePrice}
-                onChange={(e) => onPurchaseChange(Number(e.target.value) || 0)}
-              />
+              <div className="input-prefix">
+                <span className="prefix">{currencyPrefix}</span>
+                <NumericInput
+                  value={form.purchasePrice}
+                  onChange={onPurchaseChange}
+                  min={0}
+                />
+              </div>
             </div>
 
+            {/* Markup */}
             <div className="form-row">
               <label>{t(lang, "markup")}</label>
-              <input
-                type="number"
-                value={form.markupPercent}
-                onChange={(e) => onMarkupChange(Number(e.target.value) || 0)}
-              />
+              <div className="input-suffix">
+                <NumericInput
+                  value={form.markupPercent}
+                  onChange={onMarkupChange}
+                />
+                <span className="suffix">%</span>
+              </div>
             </div>
 
+            {/* Sale price */}
             <div className="form-row">
               <label>
                 {t(lang, "salePrice")} <span className="req">*</span>
               </label>
-              <input
-                type="number"
-                min={0}
-                value={form.salePrice}
-                onChange={(e) => onSaleChange(Number(e.target.value) || 0)}
-              />
+              <div className="input-prefix">
+                <span className="prefix">{currencyPrefix}</span>
+                <NumericInput
+                  value={form.salePrice}
+                  onChange={onSaleChange}
+                  min={0}
+                />
+              </div>
             </div>
 
+            {/* Barcode */}
             <div className="form-row full">
               <label>{t(lang, "barcode")}</label>
               <div className="input-trailing">
@@ -366,6 +517,7 @@ export default function ProductFormModal({
               </div>
             </div>
 
+            {/* Description */}
             <div className="form-row full">
               <label>{t(lang, "description")}</label>
               <textarea
@@ -375,6 +527,7 @@ export default function ProductFormModal({
               />
             </div>
 
+            {/* Stores */}
             <div className="form-row full">
               <button
                 type="button"
@@ -403,16 +556,10 @@ export default function ProductFormModal({
                       return (
                         <div className="store-row" key={s.storeId}>
                           <div className="store-name">{name}</div>
-                          <input
-                            type="number"
-                            min={0}
+                          <NumericInput
                             value={s.qty}
-                            onChange={(e) =>
-                              setStockQty(
-                                s.storeId,
-                                Number(e.target.value) || 0
-                              )
-                            }
+                            onChange={(v) => setStockQty(s.storeId, v)}
+                            min={0}
                           />
                         </div>
                       );
@@ -424,6 +571,7 @@ export default function ProductFormModal({
                       placeholder={t(lang, "newStoreName")}
                       value={newStoreName}
                       onChange={(e) => setNewStoreName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddStore()}
                     />
                     <button
                       type="button"

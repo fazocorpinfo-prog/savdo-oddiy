@@ -1,32 +1,5 @@
 import type { Category, Product, Settings, Store } from "./types";
-
-const KEY_PRODUCTS = "savdo.products";
-const KEY_CATEGORIES = "savdo.categories";
-const KEY_STORES = "savdo.stores";
-const KEY_SETTINGS = "savdo.settings";
-
-const read = <T,>(key: string, fallback: T): T => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-const write = (key: string, value: unknown) =>
-  localStorage.setItem(key, JSON.stringify(value));
-
-export const loadProducts = (): Product[] => read<Product[]>(KEY_PRODUCTS, []);
-export const saveProducts = (p: Product[]) => write(KEY_PRODUCTS, p);
-
-export const loadCategories = (): Category[] =>
-  read<Category[]>(KEY_CATEGORIES, []);
-export const saveCategories = (c: Category[]) => write(KEY_CATEGORIES, c);
-
-export const loadStores = (): Store[] =>
-  read<Store[]>(KEY_STORES, [{ id: "store-main", name: "Asosiy do'kon" }]);
-export const saveStores = (s: Store[]) => write(KEY_STORES, s);
+import { colAll, colClear, colDel, colSet, docGet, docSet } from "./lib/db";
 
 const DEFAULT_SETTINGS: Settings = {
   usdRate: 12500,
@@ -34,8 +7,31 @@ const DEFAULT_SETTINGS: Settings = {
   lang: "uz",
 };
 
-export const loadSettings = (): Settings => {
-  const s = read<Partial<Settings>>(KEY_SETTINGS, {});
-  return { ...DEFAULT_SETTINGS, ...s };
+export const loadProducts = () => colAll<Product>("products");
+export const saveProduct = (p: Product) => colSet("products", p);
+export const removeProduct = (id: string) => colDel("products", id);
+
+export const loadCategories = () => colAll<Category>("categories");
+export const saveCategory = (c: Category) => colSet("categories", c);
+export const removeCategory = (id: string) => colDel("categories", id);
+
+export const loadStores = async (): Promise<Store[]> => {
+  const list = await colAll<Store>("stores");
+  if (list.length === 0) {
+    const def: Store = { id: "store-main", name: "Asosiy do'kon" };
+    await colSet("stores", def);
+    return [def];
+  }
+  return list;
 };
-export const saveSettings = (s: Settings) => write(KEY_SETTINGS, s);
+export const saveStore = (s: Store) => colSet("stores", s);
+export const removeStore = (id: string) => colDel("stores", id);
+
+export const loadSettings = async (): Promise<Settings> => {
+  const s = await docGet<Partial<Settings>>("settings", "main");
+  return { ...DEFAULT_SETTINGS, ...(s ?? {}) };
+};
+export const saveSettings = (s: Settings) => docSet("settings", "main", s);
+
+export const clearAllData = () =>
+  Promise.all([colClear("products"), colClear("categories"), colClear("stores")]);

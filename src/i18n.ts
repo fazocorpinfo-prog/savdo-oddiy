@@ -25,6 +25,7 @@ const uz: Dict = {
   totalProducts: "barcha mahsulotlar",
   save: "Saqlash",
   cancel: "Bekor qilish",
+  close: "Yopish",
   clearAll: "Barchasini bekor qilish",
   saveAndShare: "Saqlash va tarqatish",
   editProduct: "Mahsulotni tahrirlash",
@@ -69,6 +70,13 @@ const uz: Dict = {
   ru: "Русский",
   noCategoriesYet: "Hozircha kategoriyalar yo'q.",
   productCount: "ta mahsulot",
+  backup: "Zaxira nusxa",
+  backupHelp: "Barcha ma'lumotlarni JSON faylga eksport qiling yoki avvalgi nusxadan tiklang.",
+  exportData: "Eksport (JSON)",
+  importData: "Import (JSON)",
+  exportDone: "Zaxira fayl yuklandi",
+  importDone: "Tiklandi",
+  importError: "Import xatosi: noto'g'ri fayl",
 };
 
 const ru: Dict = {
@@ -94,6 +102,7 @@ const ru: Dict = {
   totalProducts: "всего товаров",
   save: "Сохранить",
   cancel: "Отмена",
+  close: "Закрыть",
   clearAll: "Очистить всё",
   saveAndShare: "Сохранить и разослать",
   editProduct: "Редактировать товар",
@@ -137,6 +146,13 @@ const ru: Dict = {
   ru: "Русский",
   noCategoriesYet: "Категорий пока нет.",
   productCount: "товаров",
+  backup: "Резервная копия",
+  backupHelp: "Экспортируйте все данные в JSON или восстановите из резервной копии.",
+  exportData: "Экспорт (JSON)",
+  importData: "Импорт (JSON)",
+  exportDone: "Файл резервной копии загружен",
+  importDone: "Восстановлено",
+  importError: "Ошибка импорта: неверный файл",
 };
 
 const DICTS: Record<Lang, Dict> = { uz, ru };

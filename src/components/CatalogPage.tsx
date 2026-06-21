@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Category, Lang, Product, Settings, Store } from "../types";
 import { displayPrice, fmtNumber, totalStock } from "../utils";
 import { t } from "../i18n";
@@ -14,6 +14,7 @@ import {
   IconEdit,
   IconFilter,
   IconPlus,
+  IconClose,
   IconSearch,
   IconTrash,
   IconUpload,
@@ -50,7 +51,16 @@ export default function CatalogPage({
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [excelOpen, setExcelOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /* Escape yopadi */
+  useEffect(() => {
+    if (!lightbox) return;
+    const h = (e: KeyboardEvent) => e.key === "Escape" && setLightbox(null);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [lightbox]);
 
   const categoryById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
@@ -221,7 +231,12 @@ export default function CatalogPage({
                   <tr key={p.id}>
                     <td>
                       {p.image ? (
-                        <img className="thumb" src={p.image} alt="" />
+                        <img
+                          className="thumb"
+                          src={p.image}
+                          alt=""
+                          onClick={() => setLightbox(p.image!)}
+                        />
                       ) : (
                         <div className="thumb-placeholder">
                           <IconBox size={16} />
@@ -280,6 +295,19 @@ export default function CatalogPage({
           </table>
         )}
       </div>
+
+      {lightbox && (
+        <div className="lightbox-backdrop" onClick={() => setLightbox(null)}>
+          <button
+            className="lightbox-close"
+            onClick={() => setLightbox(null)}
+            title={t(lang, "close")}
+          >
+            <IconClose />
+          </button>
+          <img className="lightbox-img" src={lightbox} alt="" />
+        </div>
+      )}
     </>
   );
 }
